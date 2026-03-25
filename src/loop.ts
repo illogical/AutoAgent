@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import type { AutoAgentConfig, LoopSummary, IterationSummary, EvalResult } from './types.js';
 import { evaluatePrompt, buildEvalFeedback } from './evaluate.js';
+import { evaluateWithRetry } from './retry.js';
 import { mutatePrompt, MutationParseError } from './mutate.js';
 import { compareResults } from './compare.js';
 import { gitCommit, isGitRepo } from './git.js';
@@ -58,8 +59,11 @@ export async function runRefinementLoop(
   // Baseline evaluation
   console.log('[AutoAgent] Running baseline evaluation...');
   let baselineResult: EvalResult;
+  const runEval = (prompt: string) =>
+    config.retryConfig ? evaluateWithRetry(prompt, config) : evaluatePrompt(prompt, config);
+
   try {
-    baselineResult = await evaluatePrompt(currentPrompt, config);
+    baselineResult = await runEval(currentPrompt);
     console.log(`  Baseline score: ${(baselineResult.compositeScore * 100).toFixed(1)}%`);
   } catch (err) {
     throw new Error(`Baseline evaluation failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -98,7 +102,7 @@ export async function runRefinementLoop(
     // c. Evaluate mutated prompt
     let afterResult: EvalResult;
     try {
-      afterResult = await evaluatePrompt(mutation.revisedPrompt, config);
+      afterResult = await runEval(mutation.revisedPrompt);
     } catch (err) {
       const errMsg = `Eval error: ${err instanceof Error ? err.message : String(err)}`;
       console.warn(`  ❌ ${errMsg}`);

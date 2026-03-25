@@ -1,4 +1,5 @@
-import type { AutoAgentConfig, EvalResult, EvalFeedback, TestCaseResult, FailureDetail } from './types.js';
+import type { AutoAgentConfig, EvalResult, EvalFeedback, TestCaseResult, FailureDetail, TemplateType } from './types.js';
+import { getTemplate, mergeTemplateWithUserConfig } from './templates/index.js';
 
 // Dynamic import of promptfoo to handle API differences
 async function getPromptfoo() {
@@ -13,6 +14,7 @@ export function buildEvalConfig(
   evalTemperature: number,
   judgeTemperature: number,
   customTests?: unknown[],
+  templateType?: TemplateType,
 ) {
   return {
     prompts: [
@@ -36,8 +38,18 @@ export function buildEvalConfig(
         },
       },
     },
-    tests: customTests ?? getDefaultTests(),
+    tests: resolveTests(customTests, templateType),
   };
+}
+
+function resolveTests(customTests?: unknown[], templateType?: TemplateType): unknown[] {
+  if (!templateType) {
+    return customTests ?? getDefaultTests();
+  }
+  const template = getTemplate(templateType);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const userTests = (customTests as any[] | undefined) ?? [];
+  return mergeTemplateWithUserConfig(template, userTests);
 }
 
 function getDefaultTests() {
@@ -68,6 +80,7 @@ export async function evaluatePrompt(
     config.evalTemperature,
     config.judgeTemperature,
     customTests,
+    config.templateType,
   );
 
   const pf = await getPromptfoo();
