@@ -2,6 +2,7 @@
 import { Command } from 'commander';
 import { loadConfig } from './config.js';
 import { runRefinementLoop } from './loop.js';
+import { gapFill } from './retry.js';
 import type { AutoAgentConfig, TemplateType } from './types.js';
 
 const program = new Command();
@@ -21,6 +22,7 @@ program
   .option('--dry-run', 'Propose mutations but do not write them')
   .option('--gap-fill <path>', 'Resume from partial results (Phase 4)')
   .option('--retry <n>', 'Max retries per test case (Phase 4)', parseInt)
+  .option('--save-partial', 'Save partial results for crash recovery')
   .option('--view', 'Run promptfoo view after completion')
   .action(async (opts) => {
     try {
@@ -34,16 +36,40 @@ program
       if (opts.mutationModel !== undefined) overrides.mutationModel = opts.mutationModel;
       if (opts.judgeModel !== undefined) overrides.judgeModel = opts.judgeModel;
       if (opts.template !== undefined) overrides.templateType = opts.template as TemplateType;
+      if (opts.retry !== undefined) {
+        overrides.retryConfig = {
+          ...(config.retryConfig ?? { retryableErrors: [], gapFillEnabled: false }),
+          maxRetries: opts.retry,
+        };
+      }
+      if (opts.savePartial) {
+        overrides.retryConfig = {
+          ...(overrides.retryConfig ?? config.retryConfig ?? { maxRetries: 3, retryableErrors: [], gapFillEnabled: false }),
+          gapFillEnabled: true,
+        };
+      }
 
       const finalConfig: AutoAgentConfig = { ...config, ...overrides };
 
-      // Run the loop
-      await runRefinementLoop(finalConfig, opts.dryRun ?? false);
+      // Gap-fill mode: resume from partial results
+      if (opts.gapFill) {
+        console.log(`[AutoAgent] Gap-fill mode: resuming from ${opts.gapFill}`);
+        const { readFile } = await import('fs/promises');
+        const currentPrompt = await readFile(finalConfig.targetPromptPath, 'utf-8');
+        await gapFill(opts.gapFill, currentPrompt, finalConfig);
+        console.log('[AutoAgent] Gap-fill complete.');
+      } else {
+        // Normal refinement loop
+        await runRefinementLoop(finalConfig, opts.dryRun ?? false);
+      }
 
       // Optionally open promptfoo view
       if (opts.view) {
         const { spawnSync } = await import('child_process');
-        spawnSync('npx', ['promptfoo', 'view'], { stdio: 'inherit' });
+        const result = spawnSync('npx', ['promptfoo', 'view'], { stdio: 'inherit' });
+        if (result.status !== 0) {
+          console.warn('[AutoAgent] promptfoo view exited with status', result.status, '— run `npx promptfoo view` manually to inspect results.');
+        }
       }
     } catch (err) {
       console.error('[AutoAgent] Fatal error:', err instanceof Error ? err.message : String(err));

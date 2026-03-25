@@ -91,7 +91,7 @@ function parseMutationResponse(raw: string): MutationResult {
   }
 
   throw new MutationParseError(
-    `Could not parse mutation response as JSON. Raw response length: ${raw.length}`,
+    `Could not parse mutation response as JSON. Raw response length: ${raw.length}. Preview: ${raw.slice(0, 100).replace(/\n/g, ' ')}`,
     raw,
   );
 }

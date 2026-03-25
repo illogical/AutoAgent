@@ -74,7 +74,7 @@ export async function evaluateWithRetry(
         throw err;
       }
 
-      const backoffMs = Math.min(1000 * Math.pow(2, attempt - 1), 30_000);
+      const backoffMs = Math.min(500 * Math.pow(2, attempt - 1), 30_000);
       console.warn(
         `  [retry] Infra failure on attempt ${attempt}/${maxRetries}: ${err instanceof Error ? err.message : String(err)}. Retrying in ${backoffMs}ms...`,
       );

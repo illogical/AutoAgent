@@ -47,7 +47,7 @@
 - [x] `src/retry.ts` — isInfraFailure(), evaluateWithRetry(), gapFill()
 - [x] `src/results-store.ts` — savePartialResults(), loadPartialResults(), findGaps()
 - [x] Integrate retry with loop.ts (use evaluateWithRetry when retryConfig present)
-- [ ] Add --retry, --gap-fill, --save-partial CLI flags
+- [x] Add --retry, --gap-fill, --save-partial CLI flags
 - [ ] Verify: simulate infra failure, confirm per-test-case retry; kill mid-run, gap-fill from partial results
 
 ## Phase 5: Example Configs
