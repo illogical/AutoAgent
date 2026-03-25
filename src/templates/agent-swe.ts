@@ -14,9 +14,11 @@ const agentSweTemplate: TemplateConfig = {
     {
       type: 'javascript',
       value: `
+        // NOTE: Code-fence JSON extraction is inlined because Promptfoo javascript assertions
+        // execute in an isolated context without access to external imports.
         var parsed = null;
         try { parsed = JSON.parse(output); } catch (_e) {
-          var fenceMatch = output.match(/\`\`\`(?:json)?\\s*([\\s\\S]*?)\`\`\`/);
+          var fenceMatch = output.match(/\\\`\\\`\\\`(?:json)?\\s*([\\s\\S]*?)\\\`\\\`\\\`/);
           if (fenceMatch) { try { parsed = JSON.parse(fenceMatch[1].trim()); } catch (_e2) {} }
         }
         if (!parsed || typeof parsed !== 'object') {

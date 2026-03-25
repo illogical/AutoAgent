@@ -23,11 +23,14 @@ export function mcpToolCallAssertion(schema: McpToolCallSchema): string {
   var argTypes = ${argTypesJson};
 
   // Attempt to parse JSON, with fallback to extract from markdown code fences
+  // NOTE: All regex patterns are self-contained because Promptfoo javascript assertions
+  // run in an isolated context with no access to external imports.
   var parsed = null;
   try {
     parsed = JSON.parse(output);
   } catch (_e) {
-    var fenceMatch = output.match(/\`\`\`(?:json)?\\s*([\\s\\S]*?)\`\`\`/);
+    // Fallback: extract JSON from a markdown code fence
+    var fenceMatch = output.match(/\\\`\\\`\\\`(?:json)?\\s*([\\s\\S]*?)\\\`\\\`\\\`/);
     if (fenceMatch) {
       try { parsed = JSON.parse(fenceMatch[1].trim()); } catch (_e2) {}
     }

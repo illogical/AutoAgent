@@ -49,8 +49,10 @@ export function curlCommandAssertion(schema: CurlCommandSchema): string {
     return { pass: false, score: 0, reason: 'Output does not contain curl command' };
   }
 
-  // Extract the curl command block (may be in a code fence)
-  var curlMatch = out.match(/\`\`\`(?:bash|sh|shell)?\\s*([\\s\\S]*?)\`\`\`/);
+  // NOTE: All patterns are self-contained — Promptfoo javascript assertions run in an
+  // isolated context with no imports, so helpers cannot be shared across assertions.
+  // Extract the curl command block (may be in a bash/sh/shell code fence)
+  var curlMatch = out.match(/\\\`\\\`\\\`(?:bash|sh|shell)?\\s*([\\s\\S]*?)\\\`\\\`\\\`/);
   var curlLine = curlMatch ? curlMatch[1].trim() : out;
 
   // Split arguments respecting quoted strings
