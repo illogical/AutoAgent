@@ -53,7 +53,7 @@ ${historySection}
 Propose a single targeted improvement to the prompt. Respond with ONLY the JSON object.`;
 }
 
-function parseMutationResponse(raw: string): MutationResult {
+export function parseMutationResponse(raw: string): MutationResult {
   // Step 1: Direct JSON.parse
   try {
     const parsed = JSON.parse(raw.trim()) as MutationResult;
