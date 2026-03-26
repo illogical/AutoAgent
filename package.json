@@ -1,0 +1,27 @@
+{
+  "name": "autoagent",
+  "version": "0.1.0",
+  "description": "Autonomous prompt refinement loop using Ollama and Promptfoo",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target node",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "promptfoo": "^0.100.0",
+    "simple-git": "^3.27.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^4.1.1",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.1"
+  }
+}
