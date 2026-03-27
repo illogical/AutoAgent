@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import z from 'zod';
 import type { AutoAgentConfig } from './types.js';
 import { readFileSync, existsSync } from 'fs';
 import { pathToFileURL } from 'url';
