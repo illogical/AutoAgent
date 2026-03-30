@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import { pathToFileURL } from 'url';
 import type { AutoAgentConfig, LoopSummary, IterationSummary, EvalResult } from './types.js';
 import { evaluatePrompt, buildEvalFeedback } from './evaluate.js';
 import { evaluateWithRetry } from './retry.js';
@@ -7,6 +8,7 @@ import { mutatePrompt, MutationParseError } from './mutate.js';
 import { compareResults } from './compare.js';
 import { gitCommit, isGitRepo } from './git.js';
 import { writeRunHistory } from './history.js';
+import { initLogger } from './logger.js';
 
 function printIterationSummary(iter: IterationSummary): void {
   const scoreStr = iter.afterScore !== undefined
@@ -49,22 +51,39 @@ export async function runRefinementLoop(
 
   const gitEnabled = config.gitEnabled && await isGitRepo();
 
-  console.log(`[AutoAgent] Starting refinement loop`);
-  console.log(`  Target: ${config.targetPromptPath}`);
-  console.log(`  Models: ${config.targetModels.join(', ')}`);
-  console.log(`  Max iterations: ${config.maxIterations}`);
-  console.log(`  Dry run: ${dryRun}`);
-  console.log('');
+  // Initialize structured logger for this run
+  const runId = startTime.replace(/[:.]/g, '-');
+  const logger = initLogger(runId);
+
+  // Load custom test cases if evalConfigPath is configured
+  let customTests: unknown[] | undefined;
+  if (config.evalConfigPath) {
+    const evalConfigAbsPath = resolve(process.cwd(), config.evalConfigPath);
+    const evalUrl = pathToFileURL(evalConfigAbsPath).href;
+    const evalModule = await import(evalUrl);
+    customTests = evalModule.default ?? evalModule.testCases;
+    logger.info(`[AutoAgent] Loaded ${Array.isArray(customTests) ? customTests.length : '?'} test cases from ${config.evalConfigPath}`);
+  }
+
+  logger.info(`[AutoAgent] Starting refinement loop`);
+  logger.info(`  Target: ${config.targetPromptPath}`);
+  logger.info(`  Models: ${config.targetModels.join(', ')}`);
+  logger.info(`  Max iterations: ${config.maxIterations}`);
+  logger.info(`  Dry run: ${dryRun}`, { target: config.targetPromptPath, models: config.targetModels, maxIterations: config.maxIterations, dryRun });
+  logger.info('');
 
   // Baseline evaluation
-  console.log('[AutoAgent] Running baseline evaluation...');
+  logger.info('[AutoAgent] Running baseline evaluation...');
   let baselineResult: EvalResult;
   const runEval = (prompt: string) =>
-    config.retryConfig ? evaluateWithRetry(prompt, config) : evaluatePrompt(prompt, config);
+    config.retryConfig ? evaluateWithRetry(prompt, config, customTests) : evaluatePrompt(prompt, config, customTests);
 
+  let baselineMs: number;
   try {
+    const baselineStart = performance.now();
     baselineResult = await runEval(currentPrompt);
-    console.log(`  Baseline score: ${(baselineResult.compositeScore * 100).toFixed(1)}%`);
+    baselineMs = Math.round(performance.now() - baselineStart);
+    logger.info(`  Baseline score: ${(baselineResult.compositeScore * 100).toFixed(1)}%`, { phase: 'baseline', score: baselineResult.compositeScore, durationMs: baselineMs });
   } catch (err) {
     throw new Error(`Baseline evaluation failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -72,16 +91,19 @@ export async function runRefinementLoop(
   let currentBaseline = baselineResult;
 
   for (let i = 1; i <= config.maxIterations; i++) {
-    console.log(`\n[AutoAgent] Iteration ${i}/${config.maxIterations}`);
+    logger.info(`\n[AutoAgent] Iteration ${i}/${config.maxIterations}`, { phase: 'iteration', iteration: i });
 
     const timestamp = new Date().toISOString();
+    const iterStart = performance.now();
 
     // a. Build eval feedback
     const evalFeedback = buildEvalFeedback(currentBaseline);
 
     // b. Mutate prompt
     let mutation;
+    let mutationMs: number;
     try {
+      const mutStart = performance.now();
       mutation = await mutatePrompt(
         currentPrompt,
         programMd,
@@ -89,23 +111,28 @@ export async function runRefinementLoop(
         history,
         config,
       );
-      console.log(`  Proposed: ${mutation.changeSummary}`);
+      mutationMs = Math.round(performance.now() - mutStart);
+      logger.info(`  Proposed: ${mutation.changeSummary}`, { phase: 'mutation', iteration: i, changeSummary: mutation.changeSummary, durationMs: mutationMs });
     } catch (err) {
       const errMsg = err instanceof MutationParseError
         ? `Parse error: ${err.message}`
         : `Mutation error: ${err instanceof Error ? err.message : String(err)}`;
-      console.warn(`  ⚠️  ${errMsg}`);
+      logger.warn(`  ⚠️  ${errMsg}`, { phase: 'mutation', iteration: i, error: errMsg });
       history.push({ iteration: i, status: 'mutation_failed', error: errMsg, timestamp });
       continue;
     }
 
     // c. Evaluate mutated prompt
     let afterResult: EvalResult;
+    let evalMs: number;
     try {
+      const evalStart = performance.now();
       afterResult = await runEval(mutation.revisedPrompt);
+      evalMs = Math.round(performance.now() - evalStart);
+      logger.debug(`  Eval complete`, { phase: 'eval', iteration: i, score: afterResult.compositeScore, durationMs: evalMs });
     } catch (err) {
       const errMsg = `Eval error: ${err instanceof Error ? err.message : String(err)}`;
-      console.warn(`  ❌ ${errMsg}`);
+      logger.error(`  ❌ ${errMsg}`, { phase: 'eval', iteration: i, error: errMsg });
       history.push({
         iteration: i,
         status: 'eval_failed',
@@ -120,6 +147,7 @@ export async function runRefinementLoop(
     // d. Compare results
     const comparison = compareResults(currentBaseline, afterResult, config);
 
+    const totalMs = Math.round(performance.now() - iterStart);
     const iterSummary: IterationSummary = {
       iteration: i,
       status: comparison.decision === 'keep' ? 'improved' : 'reverted',
@@ -130,6 +158,7 @@ export async function runRefinementLoop(
       scoreDelta: comparison.scoreDelta,
       perModelDeltas: comparison.perModelDeltas,
       timestamp,
+      timings: { mutationMs, evalMs, totalMs },
     };
 
     // e/f. Keep or revert
@@ -141,7 +170,7 @@ export async function runRefinementLoop(
           try {
             await gitCommit(config.targetPromptPath, commitMsg);
           } catch (err) {
-            console.warn(`  Git commit failed: ${err instanceof Error ? err.message : String(err)}`);
+            logger.warn(`  Git commit failed: ${err instanceof Error ? err.message : String(err)}`, { phase: 'git', error: String(err) });
           }
         }
       }
@@ -160,12 +189,12 @@ export async function runRefinementLoop(
     // h. Check stop conditions
     if (cumulativeDelta >= config.targetScoreDelta) {
       stopReason = 'target_delta_reached';
-      console.log(`\n[AutoAgent] Target score delta reached (${(cumulativeDelta * 100).toFixed(1)}%)`);
+      logger.info(`\n[AutoAgent] Target score delta reached (${(cumulativeDelta * 100).toFixed(1)}%)`, { stopReason, cumulativeDelta });
       break;
     }
     if (consecutiveNoImprovement >= config.plateauThreshold) {
       stopReason = 'plateau';
-      console.log(`\n[AutoAgent] Plateau detected (${consecutiveNoImprovement} consecutive no-improvement)`);
+      logger.info(`\n[AutoAgent] Plateau detected (${consecutiveNoImprovement} consecutive no-improvement)`, { stopReason, consecutiveNoImprovement });
       break;
     }
   }
@@ -187,18 +216,18 @@ export async function runRefinementLoop(
 
   if (!dryRun) {
     const historyPath = await writeRunHistory(summary);
-    console.log(`\n[AutoAgent] Run history saved to ${historyPath}`);
+    logger.info(`\n[AutoAgent] Run history saved to ${historyPath}`, { historyPath });
   }
 
-  console.log('\n[AutoAgent] Summary:');
-  console.log(`  Iterations: ${summary.totalIterations}`);
-  console.log(`  Improvements: ${summary.improvementCount}`);
-  console.log(`  Reverts: ${summary.revertCount}`);
-  console.log(`  Failures: ${summary.failureCount}`);
-  console.log(`  Baseline score: ${(summary.baselineScore * 100).toFixed(1)}%`);
-  console.log(`  Final score: ${(summary.finalScore * 100).toFixed(1)}%`);
-  console.log(`  Cumulative delta: ${(summary.cumulativeDelta * 100).toFixed(1)}%`);
-  console.log(`  Stop reason: ${summary.stopReason}`);
+  logger.info('\n[AutoAgent] Summary:');
+  logger.info(`  Iterations: ${summary.totalIterations}`);
+  logger.info(`  Improvements: ${summary.improvementCount}`);
+  logger.info(`  Reverts: ${summary.revertCount}`);
+  logger.info(`  Failures: ${summary.failureCount}`);
+  logger.info(`  Baseline score: ${(summary.baselineScore * 100).toFixed(1)}%`);
+  logger.info(`  Final score: ${(summary.finalScore * 100).toFixed(1)}%`);
+  logger.info(`  Cumulative delta: ${(summary.cumulativeDelta * 100).toFixed(1)}%`);
+  logger.info(`  Stop reason: ${summary.stopReason}`, { phase: 'summary', ...summary });
 
   return summary;
 }

@@ -86,6 +86,11 @@ export interface IterationSummary {
   perModelDeltas?: Record<string, number>;
   error?: string;
   timestamp: string;
+  timings?: {
+    mutationMs: number;
+    evalMs: number;
+    totalMs: number;
+  };
 }
 
 export interface LoopSummary {

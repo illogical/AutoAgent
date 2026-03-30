@@ -414,7 +414,7 @@ npm run test:all
 ### Environment
 
 - **Ollama:** Running locally (default `http://localhost:11434`)
-- **DevPlanner MCP server:** Running at `http://localhost:3000`
+- **DevPlanner MCP server:** Running at `http://tiny-tower:17103`
 - **Test model:** `ministral-3:latest`
 
 ---

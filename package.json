@@ -10,7 +10,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e:mcp": "vitest run --config vitest.e2e.config.ts tests/e2e/devplanner-mcp.e2e.test.ts",
+    "test:e2e:compare": "vitest run --config vitest.e2e.config.ts tests/e2e/devplanner-comparison.e2e.test.ts",
+    "test:all": "vitest run && vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
     "commander": "^12.0.0",
