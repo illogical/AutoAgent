@@ -7,7 +7,7 @@ import { evaluateWithRetry } from './retry.js';
 import { mutatePrompt, MutationParseError } from './mutate.js';
 import { compareResults } from './compare.js';
 import { gitCommit, isGitRepo } from './git.js';
-import { writeRunHistory } from './history.js';
+import { writeRunHistory, loadPriorChangeSummaries } from './history.js';
 import { initLogger } from './logger.js';
 
 function printIterationSummary(iter: IterationSummary): void {
@@ -54,6 +54,18 @@ export async function runRefinementLoop(
   // Initialize structured logger for this run
   const runId = startTime.replace(/[:.]/g, '-');
   const logger = initLogger(runId);
+
+  // Load prior run summaries for cross-run deduplication
+  const priorChangeSummaries: string[] = config.useHistoryContext
+    ? await loadPriorChangeSummaries(undefined, config.historyContextRuns)
+    : [];
+
+  if (priorChangeSummaries.length > 0) {
+    logger.info('Loaded prior change summaries for history context', {
+      count: priorChangeSummaries.length,
+      runs: config.historyContextRuns,
+    });
+  }
 
   // Load custom test cases if evalConfigPath is configured
   let customTests: unknown[] | undefined;
@@ -110,6 +122,7 @@ export async function runRefinementLoop(
         evalFeedback,
         history,
         config,
+        priorChangeSummaries,
       );
       mutationMs = Math.round(performance.now() - mutStart);
       logger.info(`  Proposed: ${mutation.changeSummary}`, { phase: 'mutation', iteration: i, changeSummary: mutation.changeSummary, durationMs: mutationMs });

@@ -24,6 +24,7 @@ function buildMutationUserPrompt(
   currentPrompt: string,
   evalFeedback: EvalFeedback | null,
   iterationHistory: IterationSummary[],
+  priorChangeSummaries: string[] = [],
 ): string {
   const historySection = iterationHistory.length > 0
     ? `\n## Previous attempts (do not repeat these)\n${iterationHistory
@@ -43,15 +44,21 @@ ${evalFeedback.failingSummary}
 ${evalFeedback.testCaseBreakdown}`
     : '\n## No eval results yet (first iteration)';
 
+  const priorSection = priorChangeSummaries.length > 0
+    ? `\n## Previously tried approaches (from prior runs — do not repeat)\n` +
+      priorChangeSummaries.map(s => `- ${s}`).join('\n')
+    : '';
+
   return `## Current prompt
 \`\`\`
 ${currentPrompt}
 \`\`\`
 ${feedbackSection}
-${historySection}
+${historySection}${priorSection}
 
 Propose a single targeted improvement to the prompt. Respond with ONLY the JSON object.`;
 }
+
 
 export function parseMutationResponse(raw: string): MutationResult {
   // Step 1: Direct JSON.parse
@@ -102,9 +109,10 @@ export async function mutatePrompt(
   evalFeedback: EvalFeedback | null,
   iterationHistory: IterationSummary[],
   config: AutoAgentConfig,
+  priorChangeSummaries: string[] = [],
 ): Promise<MutationResult> {
   const systemMessage = buildMutationSystemPrompt(programMd);
-  const userMessage = buildMutationUserPrompt(currentPrompt, evalFeedback, iterationHistory);
+  const userMessage = buildMutationUserPrompt(currentPrompt, evalFeedback, iterationHistory, priorChangeSummaries);
 
   const response = await callOllama(
     config.mutationModel,

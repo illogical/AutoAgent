@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { loadConfig } from './config.js';
 import { runRefinementLoop } from './loop.js';
 import { gapFill } from './retry.js';
+import { listRunHistories, loadRunHistory, formatRunTable, formatRunDetail } from './history.js';
 import type { AutoAgentConfig, TemplateType } from './types.js';
 
 const program = new Command();
@@ -74,6 +75,25 @@ program
     } catch (err) {
       console.error('[AutoAgent] Fatal error:', err instanceof Error ? err.message : String(err));
       process.exit(1);
+    }
+  });
+
+program
+  .command('history [file]')
+  .description('List past runs or show per-iteration detail for a specific run file')
+  .option('--dir <path>', 'History directory to read from', './history')
+  .action(async (file: string | undefined, opts: { dir: string }) => {
+    if (file) {
+      const summary = await loadRunHistory(file);
+      console.log(formatRunDetail(summary, file));
+    } else {
+      const paths = await listRunHistories(opts.dir);
+      if (paths.length === 0) {
+        console.log('No run history found in ' + opts.dir);
+        return;
+      }
+      const summaries = await Promise.all(paths.map(loadRunHistory));
+      console.log(formatRunTable(summaries, paths));
     }
   });
 

@@ -22,6 +22,7 @@ Inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) 
 - [Writing eval-config.ts](#writing-eval-configts)
 - [Using the Examples](#using-the-examples)
 - [Promptfoo Integration](#promptfoo-integration)
+- [Logs & History](#logs--history)
 - [Project Structure](#project-structure)
 
 ---
@@ -179,6 +180,8 @@ All options in `auto-agent.config.ts`:
 | `templateType` | TemplateType | — | Apply a pre-built template |
 | `retryConfig` | RetryConfig | — | Retry/gap-fill configuration |
 | `evalConfigPath` | string | — | Path to external eval config file |
+| `useHistoryContext` | boolean | `false` | Inject prior run change summaries into mutation prompt to avoid repeating experiments |
+| `historyContextRuns` | number | `5` | Number of recent run history files to scan for prior summaries |
 
 **RetryConfig options:**
 ```typescript
@@ -330,6 +333,123 @@ AutoAgent uses Promptfoo's `evaluate()` API directly (not the CLI). Key integrat
 
 ---
 
+## Logs & History
+
+AutoAgent persists two types of artifacts for observability and experiment tracking:
+
+### `./logs/` — Structured event log
+
+One JSON Lines file per run: `logs/run-${runId}.log`. Each line is a JSON object:
+
+```json
+{"level":20,"levelName":"info","time":"2026-04-05T10:23:01.456Z","runId":"2026-04-05T10-23-00-000Z","msg":"Baseline evaluation complete","phase":"baseline","score":0.62,"durationMs":4120}
+```
+
+| Field | Description |
+|-------|-------------|
+| `level` | Numeric level: 10=debug, 20=info, 30=warn, 40=error |
+| `levelName` | Human-readable level |
+| `time` | ISO 8601 timestamp |
+| `runId` | Identifies which run produced this log entry |
+| `msg` | Log message |
+| *(additional fields)* | Structured data passed by the caller (phase, score, durationMs, etc.) |
+
+Control verbosity:
+
+```bash
+LOG_LEVEL=debug bun run start   # show all debug-level events (verbose)
+LOG_LEVEL=warn  bun run start   # show only warnings and errors
+```
+
+Default: `info`.
+
+---
+
+### `./history/` — Run history
+
+One JSON file per completed run: `history/run-${timestamp}.json`. Not written during `--dry-run`.
+
+**Top-level fields (`LoopSummary`):**
+
+| Field | Description |
+|-------|-------------|
+| `startTime` / `endTime` | ISO timestamps for the full run |
+| `totalIterations` | Number of iterations attempted |
+| `improvementCount` | Iterations where score improved and change was kept |
+| `revertCount` | Iterations where change was reverted |
+| `failureCount` | Iterations that failed (mutation or eval error) |
+| `baselineScore` / `finalScore` | Composite scores at start and end |
+| `cumulativeDelta` | Total score improvement over the run |
+| `stopReason` | Why the loop stopped: `max_iterations`, `target_delta_reached`, `plateau` |
+| `iterations` | Array of per-iteration records (see below) |
+
+**Per-iteration fields (`IterationSummary`):**
+
+| Field | Description |
+|-------|-------------|
+| `iteration` | Iteration number (1-based) |
+| `status` | `improved`, `reverted`, `mutation_failed`, `eval_failed` |
+| `changeSummary` | One-line description of the proposed mutation |
+| `rationale` | Why the mutation agent proposed this change |
+| `beforeScore` / `afterScore` | Composite scores before and after |
+| `scoreDelta` | `afterScore - beforeScore` |
+| `perModelDeltas` | Per-model score changes (detects overfitting) |
+| `error` | Error message if `status` is `*_failed` |
+| `timestamp` | When this iteration started |
+| `timings.mutationMs` | Time to generate the mutation |
+| `timings.evalMs` | Time to evaluate the new prompt |
+| `timings.totalMs` | Total iteration time |
+
+---
+
+### Viewing history
+
+Use the `history` subcommand to inspect past runs without opening JSON files manually:
+
+```bash
+# List all past runs (table view)
+bun run src/index.ts history
+
+# Per-iteration detail for a specific run
+bun run src/index.ts history ./history/run-2026-04-05T10-23-00-000Z.json
+
+# Use a non-default history directory
+bun run src/index.ts history --dir ./my-history
+```
+
+Example table output:
+
+```
+Run                           Duration   Iters   Baseline   Final    Delta    Stop Reason
+2026-04-05T10-23-00-000Z      2m 34s     8/8     62.0%      74.5%   +0.125   plateau
+2026-04-05T14-01-00-000Z      4m 12s     20/20   74.5%      81.2%   +0.067   max_iterations
+```
+
+---
+
+### Cross-run deduplication
+
+Enable `useHistoryContext` to prevent the mutation agent from proposing changes it already tried in previous runs:
+
+```typescript
+// auto-agent.config.ts
+export default {
+  // ... other config
+  useHistoryContext: true,     // inject prior changeSummary strings into mutation prompt
+  historyContextRuns: 5,       // how many recent run files to scan (default: 5)
+};
+```
+
+When enabled, AutoAgent loads `changeSummary` strings from the most recent N run files at startup and injects them into the mutation agent's prompt as a "Previously tried approaches — do not repeat" section.
+
+**Notes:**
+- Opt-in (default: `false`) to avoid prompt bloat for users who haven't accumulated history yet.
+- De-duplicates across files — the same summary from multiple runs appears only once.
+- Silently skips corrupt or unreadable history files.
+- `historyContextRuns: 0` is clamped to 1 (minimum one run of context).
+
+---
+
 ## Project Structure
 
 ```
@@ -369,7 +489,8 @@ AutoAgent/
 │   └── rag-pipeline/              # RAG Q&A example
 ├── prompts/
 │   └── target.md                  # The prompt being refined
-├── history/                       # Generated run logs (JSON)
+├── history/                       # Run summaries in JSON (LoopSummary, one file per run)
+├── logs/                          # Structured JSON Lines event logs (one file per run)
 ├── partial-results/               # Crash recovery data
 ├── program.md                     # Mutation agent instructions
 ├── eval-config.ts                 # Your test cases

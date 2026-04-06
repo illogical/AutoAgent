@@ -39,6 +39,8 @@ const AutoAgentConfigSchema = z.object({
     partialResultsPath: z.string().optional(),
   }).optional(),
   evalConfigPath: z.string().optional(),
+  useHistoryContext: z.boolean().default(false),
+  historyContextRuns: z.number().int().positive().default(5),
 });
 
 export const DEFAULT_CONFIG: AutoAgentConfig = {
@@ -60,6 +62,8 @@ export const DEFAULT_CONFIG: AutoAgentConfig = {
   autoRevert: false,
   maxConcurrency: 2,
   writeLatestResults: true,
+  useHistoryContext: false,
+  historyContextRuns: 5,
 };
 
 export async function loadConfig(configPath?: string): Promise<AutoAgentConfig> {

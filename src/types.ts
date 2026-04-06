@@ -20,6 +20,10 @@ export interface AutoAgentConfig {
   templateType?: TemplateType;
   retryConfig?: RetryConfig;
   evalConfigPath?: string;
+  /** If true, inject prior run change summaries into mutation prompt. Default: false */
+  useHistoryContext?: boolean;
+  /** How many recent run files to scan for prior summaries. Default: 5 */
+  historyContextRuns?: number;
 }
 
 export type TemplateType =
